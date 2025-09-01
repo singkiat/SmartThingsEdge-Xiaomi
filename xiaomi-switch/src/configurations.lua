@@ -60,6 +60,15 @@ local devices = {
       supported_button_values = {"pushed", "pushed_2x"}
     }
   },
+  GROUP_ACN058 = {
+    MATCHING_MODELS = {
+      "lumi.switch.acn058",
+    },
+    CONFIGS = {
+      first_button_ep = 0x0001,
+      supported_button_values = {"pushed", "pushed_2x"}
+    }
+  },
   GROUP5 = { 
     MATCHING_MODELS = {
       "lumi.sensor_86sw1", "lumi.sensor_86sw2",

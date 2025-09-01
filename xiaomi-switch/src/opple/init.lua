@@ -22,6 +22,7 @@ local OPPLE_FINGERPRINTS = {
     { model = "^lumi.remote.b.8" },
     { model = "^lumi.switch.b.lc04" },
     { model = "^lumi.switch..3acn." },
+    { model = "^lumi.switch.acn058" },
 }
 
 local is_opple = function(opts, driver, device)
@@ -44,10 +45,21 @@ local send_opple_message = function (device, attr, payload, endpoint)
 end
 
 local do_refresh = function(self, device)
+    local deviceModel = device:get_model()
+    
     device:send(PowerConfiguration.attributes.BatteryVoltage:read(device))
 
-    device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0009, 0x115F))
-    device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0125, 0x115F))
+    -- Special handling for lumi.switch.acn058
+    if deviceModel == "lumi.switch.acn058" then
+        log.info("🎯 ACN058 REFRESH: Reading acn058-specific attributes")
+        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0125, 0x115F))  -- Multi-click
+        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x00F7, 0x115F))  -- Button events
+    else
+        -- Standard opple refresh
+        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0009, 0x115F))
+        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0125, 0x115F))
+    end
+    
     zigbee_utils.print_clusters(device)
     device:send(Groups.server.commands.GetGroupMembership(device, {}))
     log.info("---")
@@ -63,22 +75,35 @@ end
 local do_configure = function(self, device)
     local operationMode = device.preferences.operationMode or 1
     operationMode = tonumber(operationMode)
+    local deviceModel = device:get_model()
 
-    log.info("Configuring Opple device " .. tostring(operationMode))
+    log.info("Configuring Opple device " .. tostring(operationMode) .. " for model: " .. tostring(deviceModel))
 
     data_types.id_to_name_map[0xE10] = "OctetString"
     data_types.name_to_id_map["SpecialType"] = 0xE10
                                                                 -- device,    cluster_id, attr_id, mfg_specific_code, data_type, payload
-    --device:send(cluster_base.write_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0009,  0x115F, data_types.Uint8, operationMode) )
+    
+    -- Special handling for lumi.switch.acn058 (ZNQBKG44LM)
+    if deviceModel == "lumi.switch.acn058" then
+        log.info("🎯 ACN058 CONFIGURE: Skipping 0x0009 attribute (unsupported), configuring 0x0125 only")
+        
+        if operationMode == 1 then -- button events
+            -- Configure multi-click mode (0x0125)
+            send_opple_message(device, 0x0125, data_types.Uint8(0x02), 0x01)
+            log.info("🎯 ACN058: Sent 0x0125 multi-click config")
+        end
+    else
+        -- Standard opple device configuration
+        send_opple_message(device, 0x0009, data_types.Uint8(operationMode), 0x01)
 
-    send_opple_message(device, 0x0009, data_types.Uint8(operationMode), 0x01)
-
-    if operationMode == 1 then -- button events
-        -- turn on the "multiple clicks" mode, otherwise the only "single click" events.
-        -- if value is 1 - there will be single clicks, 2 - multiple.
-        --device:send(cluster_base.write_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0125, 0x115F, data_types.Uint8, 0x02) ) 
-        send_opple_message(device, 0x0125, data_types.Uint8(0x02), 0x01)
-    elseif operationMode == 0 then      -- light group binding
+        if operationMode == 1 then -- button events
+            -- turn on the "multiple clicks" mode, otherwise the only "single click" events.
+            -- if value is 1 - there will be single clicks, 2 - multiple.
+            send_opple_message(device, 0x0125, data_types.Uint8(0x02), 0x01)
+        end
+    end
+    
+    if operationMode == 0 then      -- light group binding
         local group = device.preferences.group or 1
         group = tonumber(group)
 
@@ -154,6 +179,13 @@ local function attr_operation_mode_handler(driver, device, value, zb_rx)
     device:set_field("operationMode", value.value, {persist = true})
 end
 
+local function attr_multi_click_handler(driver, device, value, zb_rx)
+    log.info("🎯 ACN058 MULTI-CLICK (0x0125): " .. tostring(value.value))
+    device:set_field("multiClickMode", value.value, {persist = true})
+end
+
+
+
 local switch_handler = {
     NAME = "Zigbee3 Aqara/Opple",
     capability_handlers = {
@@ -165,7 +197,8 @@ local switch_handler = {
         attr = {
             [xiaomi_utils.OppleCluster] = {
                 [0x0009] = attr_operation_mode_handler,
-                [0x00F7] = xiaomi_utils.handler
+                [0x0125] = attr_multi_click_handler,    -- Multi-click mode for acn058
+                [0x00F7] = xiaomi_utils.handler        -- Standard xiaomi framework handler
             },
             [PowerConfiguration.ID] = {
                 [PowerConfiguration.attributes.BatteryVoltage.ID] = xiaomi_utils.emit_battery_event,
