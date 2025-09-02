@@ -35,6 +35,13 @@ components:
       version: 1
     categories:
     - name: Switch
+  - id: slider
+    label: "Slider"
+    capabilities:
+    - id: button
+      version: 1
+    categories:
+    - name: RemoteController
   - id: group1
     label: "All buttons"
     capabilities:

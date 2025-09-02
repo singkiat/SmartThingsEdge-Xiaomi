@@ -52,7 +52,7 @@ local do_refresh = function(self, device)
     -- Special handling for lumi.switch.acn058
     if deviceModel == "lumi.switch.acn058" then
         log.info("🎯 ACN058 REFRESH: Reading acn058-specific attributes")
-        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0125, 0x115F))  -- Multi-click
+        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0286, 0x115F))  -- Multi-click
         device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x00F7, 0x115F))  -- Button events
     else
         -- Standard opple refresh
@@ -85,12 +85,12 @@ local do_configure = function(self, device)
     
     -- Special handling for lumi.switch.acn058 (ZNQBKG44LM)
     if deviceModel == "lumi.switch.acn058" then
-        log.info("🎯 ACN058 CONFIGURE: Skipping 0x0009 attribute (unsupported), configuring 0x0125 only")
+        log.info("🎯 ACN058 CONFIGURE: Skipping 0x0009 attribute (unsupported), configuring 0x0286 only")
         
         if operationMode == 1 then -- button events
-            -- Configure multi-click mode (0x0125)
-            send_opple_message(device, 0x0125, data_types.Uint8(0x02), 0x01)
-            log.info("🎯 ACN058: Sent 0x0125 multi-click config")
+            -- Configure multi-click mode (0x0286)
+            send_opple_message(device, 0x0286, data_types.Uint8(0x02), 0x01)
+            log.info("🎯 ACN058: Sent 0x0286 multi-click config")
         end
     else
         -- Standard opple device configuration
@@ -180,8 +180,31 @@ local function attr_operation_mode_handler(driver, device, value, zb_rx)
 end
 
 local function attr_multi_click_handler(driver, device, value, zb_rx)
-    log.info("🎯 ACN058 MULTI-CLICK (0x0125): " .. tostring(value.value))
+    local attr_id = zb_rx.body.zcl_body.attr_records[1].attr_id.value
+    log.info("🎯 MULTI-CLICK (0x" .. string.format("%04X", attr_id) .. "): " .. tostring(value.value))
     device:set_field("multiClickMode", value.value, {persist = true})
+end
+
+local function attr_slider_handler(driver, device, value, zb_rx)
+    log.info("🎯 SLIDER (0x028C): " .. tostring(value.value))
+    
+    -- Slider value mapping for ACN058
+    local slider_mapping = {
+        [1] = capabilities.button.button.pushed,
+        [2] = capabilities.button.button.double,
+        [3] = capabilities.button.button.held,
+        [4] = capabilities.button.button.swipe_up,
+        [5] = capabilities.button.button.swipe_down,
+    }
+    
+    local button_event = slider_mapping[value.value]
+    if button_event then
+        -- Emit slider event to slider component
+        device:emit_component_event(device.profile.components.slider, button_event({state_change = true}))
+        log.info("🎯 SLIDER EVENT: Emitted " .. tostring(button_event) .. " to slider component")
+    else
+        log.warn("🎯 SLIDER UNKNOWN: value " .. tostring(value.value) .. " not mapped")
+    end
 end
 
 
@@ -197,7 +220,9 @@ local switch_handler = {
         attr = {
             [xiaomi_utils.OppleCluster] = {
                 [0x0009] = attr_operation_mode_handler,
-                [0x0125] = attr_multi_click_handler,    -- Multi-click mode for acn058
+                [0x0125] = attr_multi_click_handler,    -- Multi-click mode for general devices
+                [0x0286] = attr_multi_click_handler,    -- Multi-click mode for acn058 (Z1 Pro)
+                [0x028C] = attr_slider_handler,         -- Slider events for acn058 (attribute 652)
                 [0x00F7] = xiaomi_utils.handler        -- Standard xiaomi framework handler
             },
             [PowerConfiguration.ID] = {

@@ -66,7 +66,7 @@ local devices = {
     },
     CONFIGS = {
       first_button_ep = 0x0001,
-      supported_button_values = {"pushed", "pushed_2x"}
+      supported_button_values = {"pushed", "pushed_2x", "pushed_3x", "held", "double", "swipe_up", "swipe_down"}
     }
   },
   GROUP5 = { 
