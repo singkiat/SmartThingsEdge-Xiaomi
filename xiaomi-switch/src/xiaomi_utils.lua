@@ -71,24 +71,30 @@ local function emit_signal_event(device, rssi_db, lqi)
 end
 
 local function emit_temperature_event(device, temperature_record)
-  if device:supports_capability(capabilities.temperatureAlarm, "main") == false then
-    return
-  end
-
   local temperature = temperature_record.value
-  local alarm = capabilities.temperatureAlarm.temperatureAlarm.cleared()
-  if temperature > 60 then
-    alarm = capabilities.temperatureAlarm.temperatureAlarm.heat()
-  elseif temperature < -20 then
-    alarm = capabilities.temperatureAlarm.temperatureAlarm.freeze()
+  log.info("🌡️ TEMPERATURE: Raw value=" .. tostring(temperature))
+  
+  -- Emit temperature measurement if device supports it
+  if device:supports_capability(capabilities.temperatureMeasurement, "main") then
+    device:emit_event(capabilities.temperatureMeasurement.temperature({value = temperature, unit = "C"}))
+    log.info("🌡️ EMITTED: Temperature " .. temperature .. "°C to temperatureMeasurement")
   end
+  
+  -- Emit temperature alarm if device supports it (optional)
+  if device:supports_capability(capabilities.temperatureAlarm, "main") then
+    local alarm = capabilities.temperatureAlarm.temperatureAlarm.cleared()
+    if temperature > 60 then
+      alarm = capabilities.temperatureAlarm.temperatureAlarm.heat()
+    elseif temperature < -20 then
+      alarm = capabilities.temperatureAlarm.temperatureAlarm.freeze()
+    end
 
-  local latest = device:get_latest_state("main", capabilities.temperatureAlarm.ID, capabilities.temperatureAlarm.temperatureAlarm.NAME)
-  if latest == alarm.value.value then
-    return
+    local latest = device:get_latest_state("main", capabilities.temperatureAlarm.ID, capabilities.temperatureAlarm.temperatureAlarm.NAME)
+    if latest ~= alarm.value.value then
+      device:emit_event(alarm)
+      log.info("🌡️ ALARM: Temperature alarm " .. alarm.value.value)
+    end
   end
-
-  device:emit_event(alarm)
 end
 
 local function emit_consumption_event(device, e_value)

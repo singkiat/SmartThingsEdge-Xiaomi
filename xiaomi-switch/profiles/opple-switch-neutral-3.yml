@@ -3,17 +3,19 @@ components:
   - id: main
     label: "Top"
     capabilities:
-    - id: switch
-      version: 1
-    - id: button
-      version: 1
     - id: powerMeter
       version: 1
     - id: energyMeter
       version: 1
     - id: voltageMeasurement
       version: 1
+    - id: temperatureMeasurement
+      version: 1
     - id: refresh
+      version: 1
+    - id: switch
+      version: 1
+    - id: button
       version: 1
     categories:
     - name: Switch
@@ -37,13 +39,6 @@ components:
     - name: Switch
   - id: slider
     label: "Slider"
-    capabilities:
-    - id: button
-      version: 1
-    categories:
-    - name: RemoteController
-  - id: group1
-    label: "All buttons"
     capabilities:
     - id: button
       version: 1

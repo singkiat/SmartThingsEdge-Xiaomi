@@ -223,12 +223,79 @@ local do_refresh = function(self, device)
 end
 
 function button_attr_handler(driver, device, value, zb_rx)
+  local deviceModel = device:get_model()
+  local endpoint = zb_rx.address_header.src_endpoint.value
+  
+  -- DISABLED: ACN058 software multi-click - device only sends value=1 through MultistateInput
+  if false and deviceModel == "lumi.switch.acn058" and value.value == 1 then -- Only handle 'pushed' events
+    log.info("🎯 ACN058 BUTTON: ep=" .. endpoint .. " value=" .. value.value .. " (software multi-click)")
+    
+    local timer_key = "button_timer_ep" .. endpoint
+    local click_count_key = "click_count_ep" .. endpoint
+    local last_click_key = "last_click_ep" .. endpoint
+    
+    local current_time = os.time() * 1000 + (os.clock() % 1) * 1000 -- milliseconds
+    local last_click_time = device:get_field(last_click_key) or 0
+    local click_count = device:get_field(click_count_key) or 0
+    local existing_timer = device:get_field(timer_key)
+    
+    -- Cancel existing timer
+    if existing_timer then
+      device.thread:cancel_timer(existing_timer)
+      log.debug("🎯 ACN058: Cancelled existing timer for ep" .. endpoint)
+    end
+    
+    -- Check if this is a rapid click (within 600ms)
+    if current_time - last_click_time < 600 then
+      click_count = click_count + 1
+      log.info("🎯 ACN058: Rapid click detected, count=" .. click_count .. " ep=" .. endpoint)
+    else
+      click_count = 1
+      log.info("🎯 ACN058: New click sequence started, ep=" .. endpoint)
+    end
+    
+    -- Store current state
+    device:set_field(last_click_key, current_time)
+    device:set_field(click_count_key, click_count)
+    
+    -- Set timer to emit event after 600ms delay
+    local timer = device.thread:call_with_delay(0.6, function()
+      local final_count = device:get_field(click_count_key) or 1
+      log.info("🎯 ACN058: Timer fired! Final click count=" .. final_count .. " for ep=" .. endpoint)
+      
+      -- Clear stored data
+      device:set_field(click_count_key, nil)
+      device:set_field(timer_key, nil)
+      
+      -- Emit appropriate event
+      local click_event
+      if final_count == 1 then
+        click_event = capabilities.button.button.pushed
+      elseif final_count == 2 then
+        click_event = capabilities.button.button.pushed_2x
+      elseif final_count >= 3 then
+        click_event = capabilities.button.button.pushed_3x
+      end
+      
+      if click_event then
+        utils.emit_button_event(device, endpoint, click_event({state_change = true}))
+        log.info("🎯 ACN058: Emitted " .. tostring(click_event) .. " for ep=" .. endpoint)
+      end
+    end)
+    
+    device:set_field(timer_key, timer)
+    return -- Don't continue with normal handler
+  end
+  
+  -- Standard button handler for all devices (including ACN058)
+  log.info("🔍 MULTISTATE INPUT: ep=" .. endpoint .. " value=" .. value.value .. " device=" .. deviceModel)
+  
   local click_type = utils.click_types[value.value]
-
   if click_type ~= nil then
-    utils.emit_button_event(device, zb_rx.address_header.src_endpoint.value, click_type({state_change = true}))
+    utils.emit_button_event(device, endpoint, click_type({state_change = true}))
+    log.info("🔍 EMITTED: " .. tostring(click_type) .. " for value=" .. value.value)
   else
-    log.info("No such st event, Button released or unknown click type: ", value.value)
+    log.warn("🔍 UNKNOWN VALUE: " .. value.value .. " not mapped in click_types")
   end
 end
 
