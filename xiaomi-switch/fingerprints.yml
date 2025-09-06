@@ -271,7 +271,13 @@ zigbeeManufacturer:
     deviceLabel: ZNQBKG44LM Aqara Smart Wall Switch Z1 Pro (With Neutral, Triple Rocker)
     manufacturer: Aqara
     model: lumi.switch.acn058
-    deviceProfileName: opple-switch-neutral-3
+    deviceProfileName: opple-switch-neutral-3-power-slider
+    
+  - id: "ZNQBKG45LM"
+    deviceLabel: ZNQBKG45LM Aqara Smart Wall Switch Z1 Pro (With Neutral, Quad Rocker)
+    manufacturer: Aqara
+    model: lumi.switch.acn059
+    deviceProfileName: opple-switch-neutral-4-power-slider
     
   - id: "WS-USC01"
     deviceLabel: WS-USC01 Wall Switch (No Neutral, Single Rocker)

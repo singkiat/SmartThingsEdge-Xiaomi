@@ -1,4 +1,4 @@
-name: opple-switch-neutral-3
+name: opple-switch-neutral-3-power-slider
 components:
   - id: main
     label: "Top"
@@ -54,8 +54,16 @@ preferences:
         0: "Light Commands (Bind to Group)"
         1: "Button Events (Normal)"
       default: "1"
-  - preferenceId: stse.changeToWirelessSwitch
-    explicit: true
+
+  - title: "Top button"
+    name: button1
+    required: true
+    preferenceType: enumeration
+    definition:
+      options:
+        0x22: "Switch 1"
+        0xFE: "Detached"
+      default: "0x22"
   
   - title: "Center button"
     name: button2
@@ -82,7 +90,7 @@ preferences:
   - preferenceId: stse.turnOffIndicatorLight
     explicit: true
 
-metadata:
-  deviceType: Switch
-  ocfDeviceType: oic.d.switch
-  deviceTypeId: Switch
+# metadata:
+#   deviceType: Switch
+#   ocfDeviceType: oic.d.switch
+#   deviceTypeId: Switch

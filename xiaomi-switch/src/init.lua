@@ -186,7 +186,19 @@ local device_init = function(self, device)
       end
       
       local comp = device.profile.components[comp_id]
-      device:emit_component_event(comp, event)
+      -- Check if there's a per-button configuration
+      local per_button_config_key = "supported_button" .. i .. "_values"
+      local button_values = configs[per_button_config_key] or configs.supported_button_values
+      local button_event = capabilities.button.supportedButtonValues(button_values)
+      device:emit_component_event(comp, button_event)
+    end
+    
+    -- Also emit supportedButtonValues to slider component if it exists
+    if device:component_exists("slider") then
+      local slider_comp = device.profile.components.slider
+      event = capabilities.button.supportedButtonValues(configs.supported_slider_values)
+      device:emit_component_event(slider_comp, event)
+      numberOfButtons = numberOfButtons + 1
     end
 
     log.info("number of buttons:", numberOfButtons)
@@ -228,7 +240,6 @@ function button_attr_handler(driver, device, value, zb_rx)
   
   -- DISABLED: ACN058 software multi-click - device only sends value=1 through MultistateInput
   if false and deviceModel == "lumi.switch.acn058" and value.value == 1 then -- Only handle 'pushed' events
-    log.info("🎯 ACN058 BUTTON: ep=" .. endpoint .. " value=" .. value.value .. " (software multi-click)")
     
     local timer_key = "button_timer_ep" .. endpoint
     local click_count_key = "click_count_ep" .. endpoint
@@ -242,16 +253,13 @@ function button_attr_handler(driver, device, value, zb_rx)
     -- Cancel existing timer
     if existing_timer then
       device.thread:cancel_timer(existing_timer)
-      log.debug("🎯 ACN058: Cancelled existing timer for ep" .. endpoint)
     end
     
     -- Check if this is a rapid click (within 600ms)
     if current_time - last_click_time < 600 then
       click_count = click_count + 1
-      log.info("🎯 ACN058: Rapid click detected, count=" .. click_count .. " ep=" .. endpoint)
     else
       click_count = 1
-      log.info("🎯 ACN058: New click sequence started, ep=" .. endpoint)
     end
     
     -- Store current state
@@ -261,7 +269,6 @@ function button_attr_handler(driver, device, value, zb_rx)
     -- Set timer to emit event after 600ms delay
     local timer = device.thread:call_with_delay(0.6, function()
       local final_count = device:get_field(click_count_key) or 1
-      log.info("🎯 ACN058: Timer fired! Final click count=" .. final_count .. " for ep=" .. endpoint)
       
       -- Clear stored data
       device:set_field(click_count_key, nil)
@@ -279,7 +286,6 @@ function button_attr_handler(driver, device, value, zb_rx)
       
       if click_event then
         utils.emit_button_event(device, endpoint, click_event({state_change = true}))
-        log.info("🎯 ACN058: Emitted " .. tostring(click_event) .. " for ep=" .. endpoint)
       end
     end)
     
@@ -290,17 +296,33 @@ function button_attr_handler(driver, device, value, zb_rx)
   -- Standard button handler for all devices (including ACN058)
   log.info("🔍 MULTISTATE INPUT: ep=" .. endpoint .. " value=" .. value.value .. " device=" .. deviceModel)
   
+  -- Debug: Log raw ZB message info
+  if zb_rx and zb_rx.address_header then
+    local cluster = zb_rx.address_header.cluster.value
+  end
+  
   local click_type = utils.click_types[value.value]
   if click_type ~= nil then
     utils.emit_button_event(device, endpoint, click_type({state_change = true}))
     log.info("🔍 EMITTED: " .. tostring(click_type) .. " for value=" .. value.value)
   else
-    log.warn("🔍 UNKNOWN VALUE: " .. value.value .. " not mapped in click_types")
+    log.warn("🔍 UNKNOWN VALUE: " .. value.value .. " (0x" .. string.format("%02X", value.value) .. ") not mapped in click_types")
+    
+    -- For debugging: emit an up event for unknown values
+    if value.value == 255 or value.value == 0xff then
+      utils.emit_button_event(device, endpoint, capabilities.button.button.up({state_change = true}))
+    end
   end
 end
 
 local function zdo_binding_table_handler(driver, device, zb_rx)
   log.warn("ZDO Binding Table Response")    
+  
+  -- Fix: Add nil check to prevent crash when zdo_body is nil
+  if not zb_rx.body.zdo_body then
+    log.warn("ZDO body is nil, skipping binding table processing")
+    return
+  end
   
   for _, binding_table in pairs(zb_rx.body.zdo_body.binding_table_entries) do
     if binding_table.dest_addr_mode.value == binding_table.DEST_ADDR_MODE_SHORT then
@@ -388,7 +410,7 @@ local switch_driver_template = {
   },
   zigbee_handlers = {
     global = {},
-    cluster = {},
+    -- cluster = {}, -- Removed: Empty cluster table overrides subdriver cluster handlers
     zdo = {
       [mgmt_bind_resp.MGMT_BIND_RESPONSE] = zdo_binding_table_handler
     },

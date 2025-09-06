@@ -39,7 +39,7 @@ utils.click_types = {
     [5] = capabilities.button.button.pushed_5x,
     [0x10] = capabilities.button.button.held,
     [0x11] = nil, -- released
-    [0xff] = nil, 
+    [0xff] = capabilities.button.button.up, -- 255 - treat as up for debugging
 }
 
 

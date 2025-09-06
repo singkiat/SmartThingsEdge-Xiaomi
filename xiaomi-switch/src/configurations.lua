@@ -60,13 +60,16 @@ local devices = {
       supported_button_values = {"pushed", "pushed_2x"}
     }
   },
-  GROUP_ACN058 = {
+  GROUP_Z1_PRO = {
     MATCHING_MODELS = {
       "lumi.switch.acn058",
+      "lumi.switch.acn059",
     },
     CONFIGS = {
       first_button_ep = 0x0001,
-      supported_button_values = {"pushed", "pushed_2x", "pushed_3x", "held", "double", "swipe_up", "swipe_down"}
+      supported_button_values = {"pushed"},
+      supported_button4_values = {"pushed", "pushed_2x", "held", "up"},  -- Wireless button specific values
+      supported_slider_values = {"pushed", "pushed_2x", "held", "up", "down"}
     }
   },
   GROUP5 = { 
@@ -170,13 +173,25 @@ configs.get_device_parameters = function(zb_device)
   -- number_of_channels
   -- neutral_wire
 
-  return {
+  local result = {
     first_switch_ep = first_switch_ep,
     number_of_channels = number_of_channels,
     neutral_wire = neutral_wire,
     first_button_ep = res.first_button_ep,
-    supported_button_values = res.supported_button_values
+    supported_button_values = res.supported_button_values or {},
+    supported_slider_values = res.supported_slider_values or {}
   }
+  
+  -- Automatically add any supported_button{N}_values configurations
+  for key, value in pairs(res) do
+    local button_num = key:match("^supported_button(%d+)_values$")
+    if button_num then
+      result[key] = value or {}
+      -- log.info("🎯 CONFIG: Found per-button config " .. key .. " = " .. table.concat(value, ", "))
+    end
+  end
+  
+  return result
 end
 
 return configs

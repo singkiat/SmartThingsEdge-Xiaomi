@@ -125,10 +125,22 @@ local function emit_power_event(device, e_value)
   device:emit_event( capabilities.powerMeter.power({value=value, unit="W"}) )
 end
 
+local function emit_button1_multiclick_event(device, value)
+  log.info("🔘 BUTTON1 MULTI-CLICK (0x6e): Raw value=" .. tostring(value.value))
+  -- TODO: Map values to actual button events once we see the data
+end
+
+local function emit_button2_multiclick_event(device, value)
+  log.info("🔘 BUTTON2 MULTI-CLICK (0x6f): Raw value=" .. tostring(value.value))
+  -- TODO: Map values to actual button events once we see the data
+end
+
 local xiaomi_utils = {
   events = {
     [0x01] = emit_battery_event,
     [0x03] = emit_temperature_event,
+    [0x6e] = emit_button1_multiclick_event,
+    [0x6f] = emit_button2_multiclick_event,
     [0x95] = emit_consumption_event,
     [0x96] = emit_voltage_event,
     [0x97] = emit_current_event,
@@ -142,8 +154,6 @@ local ignore_events = {
   [0x0a] = "router_id",
   [0x64] = "user1", 
   [0x65] = "user2",
-  [0x6e] = "button1",
-  [0x6f] = "button2",
 }
 
 function xiaomi_utils.emit_battery_event(driver, device, value, zb_rx)

@@ -1,4 +1,3 @@
--- https://github.com/Koenkk/zigbee-herdsman-converters/blob/master/devices/xiaomi.js
 local zcl_clusters = require "st.zigbee.zcl.clusters"
 local capabilities = require "st.capabilities"
 
@@ -23,6 +22,7 @@ local OPPLE_FINGERPRINTS = {
     { model = "^lumi.switch.b.lc04" },
     { model = "^lumi.switch..3acn." },
     { model = "^lumi.switch.acn058" },
+    { model = "^lumi.switch.acn059" },
 }
 
 local is_opple = function(opts, driver, device)
@@ -32,6 +32,11 @@ local is_opple = function(opts, driver, device)
         end
     end
     return false
+end
+
+local is_z1_pro = function(device)
+    local deviceModel = device:get_model()
+    return deviceModel == "lumi.switch.acn058" or deviceModel == "lumi.switch.acn059"
 end
 
 local send_opple_message = function (device, attr, payload, endpoint)
@@ -45,60 +50,39 @@ local send_opple_message = function (device, attr, payload, endpoint)
 end
 
 local do_refresh = function(self, device)
-    local deviceModel = device:get_model()
-    
     device:send(PowerConfiguration.attributes.BatteryVoltage:read(device))
 
-    -- Special handling for lumi.switch.acn058
-    if deviceModel == "lumi.switch.acn058" then
-        log.info("🎯 ACN058 REFRESH: Reading acn058-specific attributes")
-        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0286, 0x115F))  -- Multi-click
-        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x00F7, 0x115F))  -- Button events
+    if is_z1_pro(device) then
+        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0286, 0x115F))
+        device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x00F7, 0x115F))
     else
-        -- Standard opple refresh
         device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0009, 0x115F))
         device:send(cluster_base.read_manufacturer_specific_attribute(device, xiaomi_utils.OppleCluster, 0x0125, 0x115F))
     end
     
     zigbee_utils.print_clusters(device)
     device:send(Groups.server.commands.GetGroupMembership(device, {}))
-    log.info("---")
     device:send( zigbee_utils.build_read_binding_table(device) )
-    log.info("~~~")
 end
 
 
--- Zigbee 3 device supports two operation modes:
--- 0: Direct mode that is not supported by ST well, and it sends switch, light, color commands directly to the device or group.
---    Binding request is mandatory, in other way commands will be sent to all connected devices
--- 1: Normal mode which sends button click messages to the hub, and actions can be reprogrammed by the user
 local do_configure = function(self, device)
     local operationMode = device.preferences.operationMode or 1
     operationMode = tonumber(operationMode)
-    local deviceModel = device:get_model()
 
-    log.info("Configuring Opple device " .. tostring(operationMode) .. " for model: " .. tostring(deviceModel))
+    log.info("Configuring Opple device " .. tostring(operationMode))
 
     data_types.id_to_name_map[0xE10] = "OctetString"
     data_types.name_to_id_map["SpecialType"] = 0xE10
-                                                                -- device,    cluster_id, attr_id, mfg_specific_code, data_type, payload
     
-    -- Special handling for lumi.switch.acn058 (ZNQBKG44LM)
-    if deviceModel == "lumi.switch.acn058" then
-        log.info("🎯 ACN058 CONFIGURE: Skipping 0x0009 attribute (unsupported), configuring 0x0286 only")
-        
-        if operationMode == 1 then -- button events
-            -- Configure multi-click mode (0x0286)
+    if is_z1_pro(device) then
+        if operationMode == 1 then
             send_opple_message(device, 0x0286, data_types.Uint8(0x02), 0x01)
-            log.info("🎯 ACN058: Sent 0x0286 multi-click config")
         end
     else
-        -- Standard opple device configuration
         send_opple_message(device, 0x0009, data_types.Uint8(operationMode), 0x01)
 
-        if operationMode == 1 then -- button events
-            -- turn on the "multiple clicks" mode, otherwise the only "single click" events.
-            -- if value is 1 - there will be single clicks, 2 - multiple.
+        if operationMode == 1 then
             send_opple_message(device, 0x0125, data_types.Uint8(0x02), 0x01)
         end
     end
@@ -121,13 +105,8 @@ local do_configure = function(self, device)
 end
 
 local function info_changed(driver, device, event, args)
-    log.info(tostring(event))
-    -- https://github.com/Koenkk/zigbee-herdsman-converters/blob/master/converters/toZigbee.js for more info
     for id, value in pairs(device.preferences) do
-      if args.old_st_store.preferences[id] ~= value then --and preferences[id] then
-        --local data = tonumber(device.preferences[id])
-        -- if device.preferences[id] is number, then data will be number, otherwise it will be string
-
+      if args.old_st_store.preferences[id] ~= value then
         local data = device.preferences[id]
         data = tonumber(data) or data
 
@@ -181,32 +160,29 @@ end
 
 local function attr_multi_click_handler(driver, device, value, zb_rx)
     local attr_id = zb_rx.body.zcl_body.attr_records[1].attr_id.value
-    log.info("🎯 MULTI-CLICK (0x" .. string.format("%04X", attr_id) .. "): " .. tostring(value.value))
-    device:set_field("multiClickMode", value.value, {persist = true})
+    device:set_field("multiClickMode_" .. string.format("%04X", attr_id), value.value, {persist = true})
 end
 
+local function attr_decoupling_handler(driver, device, value, zb_rx)
+    local endpoint = zb_rx.address_header.src_endpoint.value
+    device:set_field("decouplingMode_EP" .. endpoint, value.value, {persist = true})
+end
+
+
 local function attr_slider_handler(driver, device, value, zb_rx)
-    log.info("🎯 SLIDER (0x028C): " .. tostring(value.value))
-    
-    -- Slider value mapping for ACN058
     local slider_mapping = {
         [1] = capabilities.button.button.pushed,
-        [2] = capabilities.button.button.double,
+        [2] = capabilities.button.button.pushed_2x,
         [3] = capabilities.button.button.held,
-        [4] = capabilities.button.button.swipe_up,
-        [5] = capabilities.button.button.swipe_down,
+        [4] = capabilities.button.button.up,
+        [5] = capabilities.button.button.down,
     }
     
     local button_event = slider_mapping[value.value]
     if button_event then
-        -- Emit slider event to slider component
         device:emit_component_event(device.profile.components.slider, button_event({state_change = true}))
-        log.info("🎯 SLIDER EVENT: Emitted " .. tostring(button_event) .. " to slider component")
-    else
-        log.warn("🎯 SLIDER UNKNOWN: value " .. tostring(value.value) .. " not mapped")
     end
 end
-
 
 
 local switch_handler = {
@@ -220,10 +196,11 @@ local switch_handler = {
         attr = {
             [xiaomi_utils.OppleCluster] = {
                 [0x0009] = attr_operation_mode_handler,
-                [0x0125] = attr_multi_click_handler,    -- Multi-click mode for general devices
-                [0x0286] = attr_multi_click_handler,    -- Multi-click mode for acn058 (Z1 Pro)
-                [0x028C] = attr_slider_handler,         -- Slider events for acn058 (attribute 652)
-                [0x00F7] = xiaomi_utils.handler        -- Standard xiaomi framework handler
+                [0x0125] = attr_multi_click_handler,
+                [0x0200] = attr_decoupling_handler,
+                [0x0286] = attr_multi_click_handler,
+                [0x028C] = attr_slider_handler,
+                [0x00F7] = xiaomi_utils.handler
             },
             [PowerConfiguration.ID] = {
                 [PowerConfiguration.attributes.BatteryVoltage.ID] = xiaomi_utils.emit_battery_event,
